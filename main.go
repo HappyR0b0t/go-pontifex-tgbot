@@ -19,7 +19,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
+	bot.Debug = true
 	updateConfig := tgbotapi.NewUpdate(0)
 	updateConfig.Timeout = 30
 
@@ -29,7 +29,7 @@ func main() {
 		if update.Message == nil {
 			continue
 		}
-		fmt.Println("Hello!", update)
+		fmt.Println("Hello!", update.Message.Text)
 	}
 
 }

@@ -8,10 +8,17 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
 )
+
+var userStates = make(map[int64]string)
+var userStatesMu sync.Mutex
+
+var textForDecipher = make(map[int64]string)
+var textForDecipherMu sync.Mutex
 
 func handleCipherCommand(request string) string {
 	url := "http://localhost:8080/cipher"
@@ -78,9 +85,6 @@ func main() {
 
 	updates := bot.GetUpdatesChan(updateConfig)
 
-	var state = "started"
-
-	var textForDecipher string
 	// var textForCipher string
 
 	for update := range updates {
@@ -89,43 +93,92 @@ func main() {
 			continue
 		}
 
-		if update.Message.IsCommand() && update.Message.Command() == "cipher" {
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Enter message for encrypt!")
-			// Отправляем сообщение обратно пользователю
-			bot.Send(msg)
-			state = "waiting_for_enter_for_cipher"
+		go handleMessage(bot, update.Message)
+
+	}
+}
+
+func handleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
+	chatID := msg.Chat.ID
+
+	userStatesMu.Lock()
+	state, ok := userStates[chatID]
+	if !ok {
+		state = "started"
+		userStates[chatID] = state
+	}
+	userStatesMu.Unlock()
+
+	if msg.IsCommand() {
+		switch msg.Command() {
+		case "cipher":
+			reply := tgbotapi.NewMessage(chatID, "Enter message to encrypt!")
+			bot.Send(reply)
+
+			userStatesMu.Lock()
+			userStates[chatID] = "waiting_for_text_to_cipher"
+			userStatesMu.Unlock()
+			return
+
+		case "decipher":
+			reply := tgbotapi.NewMessage(chatID, "Enter message to decrypt!")
+			bot.Send(reply)
+
+			userStatesMu.Lock()
+			userStates[chatID] = "waiting_for_text_to_decipher"
+			userStatesMu.Unlock()
+			return
+		case "start":
+			reply := tgbotapi.NewMessage(chatID, "Use /cipher or /decipher to start.")
+			bot.Send(reply)
+
+			userStatesMu.Lock()
+			userStates[chatID] = "started"
+			userStatesMu.Unlock()
+			return
 		}
 
-		if update.Message.IsCommand() && update.Message.Command() == "decipher" {
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Enter message for decrypt!")
-			// Отправляем сообщение обратно пользователю
-			bot.Send(msg)
-			state = "waiting_for_enter_for_decipher"
-		}
+	}
 
-		if !update.Message.IsCommand() && update.Message.Text != "" {
-			if state == "started" {
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Enter command cipher or decipher!")
-				bot.Send(msg)
-			}
-			if state == "waiting_for_enter_for_cipher" {
-				ciphered_text := handleCipherCommand(update.Message.Text)
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, ciphered_text)
-				bot.Send(msg)
-				state = "started"
-			} else if state == "waiting_for_enter_for_decipher" {
-				textForDecipher = update.Message.Text
-				state = "waiting_for_deck_to_decipher"
-				// deciphered_text := handleDecipherCommand(update.Message.Text)
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Enter deck for deciphering")
-				bot.Send(msg)
-				// state = "started"
-			} else if state == "waiting_for_deck_to_decipher" {
-				deciphered_text := handleDecipherCommand(textForDecipher, update.Message.Text)
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, deciphered_text)
-				bot.Send(msg)
-				state = "started"
-			}
+	if !msg.IsCommand() && msg.Text != "" {
+		switch state {
+		case "started":
+			reply := tgbotapi.NewMessage(chatID, "Please use /cipher or /decipher first.")
+			bot.Send(reply)
+
+		case "waiting_for_text_to_cipher":
+			ciphered := handleCipherCommand(msg.Text)
+			reply := tgbotapi.NewMessage(chatID, ciphered)
+			bot.Send(reply)
+
+			userStatesMu.Lock()
+			userStates[chatID] = "started"
+			userStatesMu.Unlock()
+
+		case "waiting_for_text_to_decipher":
+			textForDecipherMu.Lock()
+			textForDecipher[chatID] = msg.Text
+			textForDecipherMu.Unlock()
+
+			reply := tgbotapi.NewMessage(chatID, "Now send the deck to use for deciphering:")
+			bot.Send(reply)
+
+			userStatesMu.Lock()
+			userStates[chatID] = "waiting_for_deck_to_decipher"
+			userStatesMu.Unlock()
+
+		case "waiting_for_deck_to_decipher":
+			textForDecipherMu.Lock()
+			originalText := textForDecipher[chatID]
+			textForDecipherMu.Unlock()
+
+			deciphered := handleDecipherCommand(originalText, msg.Text)
+			reply := tgbotapi.NewMessage(chatID, deciphered)
+			bot.Send(reply)
+
+			userStatesMu.Lock()
+			userStates[chatID] = "started"
+			userStatesMu.Unlock()
 		}
 	}
 }

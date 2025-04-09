@@ -137,7 +137,6 @@ func handleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 			userStatesMu.Unlock()
 			return
 		}
-
 	}
 
 	if !msg.IsCommand() && msg.Text != "" {

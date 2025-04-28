@@ -14,11 +14,35 @@ import (
 	"github.com/joho/godotenv"
 )
 
-var userStates = make(map[int64]string)
-var userStatesMu sync.Mutex
+var (
+	userStates        = make(map[int64]string)
+	userStatesMu      sync.Mutex
+	textForDecipher   = make(map[int64]string)
+	textForDecipherMu sync.Mutex
 
-var textForDecipher = make(map[int64]string)
-var textForDecipherMu sync.Mutex
+	// Menu texts
+	firstMenu = "<b>Main menu</b>\n\nSelect an option"
+	// secondMenu = "<b>Cipher a text message menu</b>\n\nSelect an option"
+	// thirdMenu  = "<b>Decipher a text message menu</b>\n\nSelect an option"
+	// fourthMenu = "<b>About</b>\n\nAbout Pontifex algorithm..."
+
+	// Button texts
+	aboutButton        = "About"
+	backButton         = "Back"
+	cipherButton       = "Cipher text"
+	decipherButton     = "Decipher text"
+	generatedeckButton = "Generate deck"
+
+	// Keyboard layout for the first menu. One button, one row
+	firstMenuMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(aboutButton, aboutButton),
+			tgbotapi.NewInlineKeyboardButtonData(cipherButton, cipherButton),
+			tgbotapi.NewInlineKeyboardButtonData(decipherButton, decipherButton),
+			tgbotapi.NewInlineKeyboardButtonData(generatedeckButton, generatedeckButton),
+		),
+	)
+)
 
 func handleCipherCommand(request string) string {
 	url := "http://localhost:8080/cipher"
@@ -39,6 +63,8 @@ func handleCipherCommand(request string) string {
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
+
+	// fmt.Println(body)
 
 	return string(body)
 }
@@ -69,6 +95,24 @@ func handleDecipherCommand(message string, deck string) string {
 	return string(body)
 }
 
+func handleGenerateCommand() string {
+	url := "http://localhost:8080/generate"
+	resp, err := http.Get(url)
+
+	if err != nil {
+		fmt.Println("Ошибка!", err)
+		return ""
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("Ошибка при чтении ответа:", err)
+		return ""
+	}
+	return string(body)
+
+}
+
 func main() {
 	err := godotenv.Load()
 	if err != nil {
@@ -85,17 +129,19 @@ func main() {
 
 	updates := bot.GetUpdatesChan(updateConfig)
 
-	// var textForCipher string
-
 	for update := range updates {
 		// Если обновление не содержит сообщение, пропускаем его
 		if update.Message == nil {
 			continue
 		}
-
 		go handleMessage(bot, update.Message)
-
 	}
+}
+
+func stateChanger(chatID int64, state string) {
+	userStatesMu.Lock()
+	userStates[chatID] = state
+	userStatesMu.Unlock()
 }
 
 func handleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
@@ -114,27 +160,27 @@ func handleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 		case "cipher":
 			reply := tgbotapi.NewMessage(chatID, "Enter message to encrypt!")
 			bot.Send(reply)
-
-			userStatesMu.Lock()
-			userStates[chatID] = "waiting_for_text_to_cipher"
-			userStatesMu.Unlock()
+			stateChanger(chatID, "waiting_for_text_to_cipher")
 			return
 
 		case "decipher":
 			reply := tgbotapi.NewMessage(chatID, "Enter message to decrypt!")
 			bot.Send(reply)
-
-			userStatesMu.Lock()
-			userStates[chatID] = "waiting_for_text_to_decipher"
-			userStatesMu.Unlock()
+			stateChanger(chatID, "waiting_for_text_to_decipher")
 			return
+
+		case "generate":
+			// reply := tgbotapi.NewMessage(chatID, "Enter message to decrypt!")
+			generated := handleGenerateCommand()
+			reply := tgbotapi.NewMessage(chatID, generated)
+			bot.Send(reply)
+
+			return
+
 		case "start":
 			reply := tgbotapi.NewMessage(chatID, "Use /cipher or /decipher to start.")
 			bot.Send(reply)
-
-			userStatesMu.Lock()
-			userStates[chatID] = "started"
-			userStatesMu.Unlock()
+			stateChanger(chatID, "started")
 			return
 		}
 	}
@@ -147,12 +193,11 @@ func handleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 
 		case "waiting_for_text_to_cipher":
 			ciphered := handleCipherCommand(msg.Text)
+
 			reply := tgbotapi.NewMessage(chatID, ciphered)
 			bot.Send(reply)
 
-			userStatesMu.Lock()
-			userStates[chatID] = "started"
-			userStatesMu.Unlock()
+			stateChanger(chatID, "started")
 
 		case "waiting_for_text_to_decipher":
 			textForDecipherMu.Lock()
@@ -162,9 +207,7 @@ func handleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 			reply := tgbotapi.NewMessage(chatID, "Now send the deck to use for deciphering:")
 			bot.Send(reply)
 
-			userStatesMu.Lock()
-			userStates[chatID] = "waiting_for_deck_to_decipher"
-			userStatesMu.Unlock()
+			stateChanger(chatID, "waiting_for_deck_to_decipher")
 
 		case "waiting_for_deck_to_decipher":
 			textForDecipherMu.Lock()
@@ -175,9 +218,8 @@ func handleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 			reply := tgbotapi.NewMessage(chatID, deciphered)
 			bot.Send(reply)
 
-			userStatesMu.Lock()
-			userStates[chatID] = "started"
-			userStatesMu.Unlock()
+			stateChanger(chatID, "started")
+
 		}
 	}
 }

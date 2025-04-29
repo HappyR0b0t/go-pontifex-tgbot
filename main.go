@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -44,6 +45,11 @@ var (
 	)
 )
 
+type CipherDecipherResponse struct {
+	Message string   `json:"answer"`
+	Deck    []string `json:"deck"`
+}
+
 func handleCipherCommand(request string) string {
 	url := "http://localhost:8080/cipher"
 
@@ -62,18 +68,36 @@ func handleCipherCommand(request string) string {
 		return ""
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	fmt.Println("----", string(body), "----")
 
-	// fmt.Println(body)
+	if err != nil {
+		fmt.Println("Ошибка при чтении ответа:", err)
+		return ""
+	}
 
-	return string(body)
+	var result CipherDecipherResponse
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		fmt.Println("Ошибка при разборе JSON:", err)
+		return ""
+	}
+	str := ""
+	str += "Your ciphered message: \n"
+	str += result.Message
+	str += "\n"
+	str += "Your deck: \n"
+	for _, card := range result.Deck {
+		str += card + " "
+	}
+
+	return str
 }
 
 func handleDecipherCommand(message string, deck string) string {
 	url := "http://localhost:8080/decipher"
 
-	var deckArr []string
-	json.Unmarshal([]byte(deck), &deckArr)
+	deckArr := strings.Split(deck, " ")
 
 	type DecipherRequest struct {
 		Message string   `json:"message"`
@@ -84,15 +108,39 @@ func handleDecipherCommand(message string, deck string) string {
 	jsonData, _ := json.Marshal(data)
 
 	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
-
 	if err != nil {
 		fmt.Println("Ошибка!", err)
 		return ""
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
 
-	return string(body)
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("Ошибка при чтении ответа:", err)
+		return ""
+	}
+
+	var result CipherDecipherResponse
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		fmt.Println("Ошибка при разборе JSON:", err)
+		return ""
+	}
+
+	str := ""
+	str += "Your deciphered message: \n"
+	str += result.Message
+	str += "\n"
+	str += "Your deck: \n"
+	for _, card := range result.Deck {
+		str += card + " "
+	}
+	return str
+}
+
+type GenerateDeckResponse struct {
+	Deck []string `json:"deck"`
 }
 
 func handleGenerateCommand() string {
@@ -105,12 +153,25 @@ func handleGenerateCommand() string {
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
+
 	if err != nil {
 		fmt.Println("Ошибка при чтении ответа:", err)
 		return ""
 	}
-	return string(body)
 
+	var result GenerateDeckResponse
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		fmt.Println("Ошибка при разборе JSON:", err)
+		return ""
+	}
+	str := ""
+
+	for _, card := range result.Deck {
+		str += card + " "
+	}
+
+	return str
 }
 
 func main() {
